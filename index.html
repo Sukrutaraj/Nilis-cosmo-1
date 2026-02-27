@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<style>
+body{
+margin:0;
+background:#111;
+font-family:Arial;
+overflow:hidden;
+color:white;
+}
+
+.topbar{text-align:center;padding:10px;}
+.message{text-align:center;font-size:4rem;}
+
+.playarea{
+position:relative;
+height:80vh;
+}
+
+/* PAD */
+.pad{
+position:absolute;
+width:135px;
+height:135px;
+border-radius:50%;
+background:white;
+display:flex;
+align-items:center;
+justify-content:center;
+transition:background-color 1.8s linear;
+touch-action:none;
+}
+
+/* SYMBOL */
+.symbol{
+opacity:0;
+transition:opacity 1.8s linear;
+}
+
+/* SHAPES */
+.plus::before,.plus::after{
+content:"";position:absolute;background:white;
+}
+.plus{position:relative;width:60px;height:60px;}
+.plus::before{width:60px;height:14px;top:23px;}
+.plus::after{width:14px;height:60px;left:23px;}
+
+.circle{width:45px;height:45px;background:white;border-radius:50%;}
+.square{width:45px;height:45px;background:white;}
+
+.triangle{
+width:0;height:0;
+border-left:28px solid transparent;
+border-right:28px solid transparent;
+border-bottom:50px solid white;
+}
+
+.diamond{
+width:40px;height:40px;
+background:white;
+transform:rotate(45deg);
+}
+
+.star{
+width:45px;height:45px;
+background:white;
+clip-path:polygon(
+50% 0%,61% 35%,98% 35%,68% 57%,79% 91%,
+50% 70%,21% 91%,32% 57%,2% 35%,39% 35%);
+}
+
+/* COLORS */
+.red{background:#d32f2f;}
+.blue{background:#1976d2;}
+.green{background:#388e3c;}
+.yellow{background:#fdd835;}
+.purple{background:#7b1fa2;}
+.orange{background:#ef6c00;}
+
+.correctGlow{
+box-shadow:0 0 40px #00ff88;
+}
+
+.moveMode{outline:6px dashed white;}
+</style>
+</head>
+
+<body>
+
+<div class="topbar">
+<button onclick="toggleMove()">Flytta</button>
+</div>
+
+<div class="message" id="message"></div>
+<div class="playarea" id="playarea"></div>
+
+<script>
+
+/* ================= STATE ================= */
+
+const STATE={
+SETUP:0,
+READY:1,
+RESULT:2
+};
+
+let gameState=STATE.SETUP;
+
+/* ================= SOUND ================= */
+
+const ctx=new(window.AudioContext||window.webkitAudioContext)();
+
+function rightSound(){
+
+// säkerställ att ljudsystemet är aktivt
+if(ctx.state === "suspended"){
+    ctx.resume();
+}
+
+const now = ctx.currentTime + 0.01;
+
+let osc = ctx.createOscillator();
+let gain = ctx.createGain();
+
+osc.type = "triangle";   // mjuk pling
+osc.frequency.setValueAtTime(1100, now);
+osc.frequency.exponentialRampToValueAtTime(1600, now + 0.18);
+
+gain.gain.setValueAtTime(0.0001, now);
+gain.gain.exponentialRampToValueAtTime(0.45, now + 0.02);
+gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+
+osc.connect(gain);
+gain.connect(ctx.destination);
+
+osc.start(now);
+osc.stop(now + 0.45);
+}
+
+function wrongSound(){
+let o=ctx.createOscillator();
+let g=ctx.createGain();
+o.frequency.value=180;
+o.type="sawtooth";
+o.connect(g);g.connect(ctx.destination);
+g.gain.setValueAtTime(.3,ctx.currentTime);
+g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.25);
+o.start();o.stop(ctx.currentTime+.25);
+}
+
+/* ================= DATA ================= */
+
+const identities=[
+{color:"red",symbol:"plus"},
+{color:"blue",symbol:"circle"},
+{color:"green",symbol:"triangle"},
+{color:"yellow",symbol:"square"},
+{color:"purple",symbol:"star"},
+{color:"orange",symbol:"diamond"}
+];
+
+const emojiMap = [
+{emoji:"🍎", color:"red"},
+{emoji:"🍌", color:"yellow"},
+{emoji:"🍇", color:"purple"},
+{emoji:"🫐", color:"blue"},
+{emoji:"🥝", color:"green"},
+{emoji:"🍊", color:"orange"}
+];
+
+let correctColor=null;
+let moveMode=false;
+
+const playarea=document.getElementById("playarea");
+const pads=[];
+
+/* ================= CREATE ================= */
+
+for(let i=0;i<6;i++){
+
+let pad=document.createElement("div");
+pad.className="pad";
+pad.innerHTML=`<div class="symbol"></div>`;
+
+pad.style.left=(Math.random()*80+5)+"vw";
+pad.style.top=(Math.random()*60+10)+"vh";
+
+playarea.appendChild(pad);
+pads.push(pad);
+
+pad.addEventListener("pointerdown",(e)=>{
+
+if(moveMode){
+pad.setPointerCapture(e.pointerId);
+let ox=e.offsetX,oy=e.offsetY;
+
+function move(ev){
+pad.style.left=(ev.clientX-ox)+"px";
+pad.style.top=(ev.clientY-oy)+"px";
+}
+function stop(){
+pad.removeEventListener("pointermove",move);
+pad.removeEventListener("pointerup",stop);
+}
+pad.addEventListener("pointermove",move);
+pad.addEventListener("pointerup",stop);
+return;
+}
+
+if(gameState!==STATE.READY) return;
+
+handlePress(pad);
+
+});
+}
+
+/* ================= SHUFFLE ================= */
+
+function shuffle(a){
+let arr=[...a];
+for(let i=arr.length-1;i>0;i--){
+let j=Math.floor(Math.random()*(i+1));
+[arr[i],arr[j]]=[arr[j],arr[i]];
+}
+return arr;
+}
+
+/* ================= ROUND ================= */
+
+function newRound(){
+
+gameState=STATE.SETUP;
+
+pads.forEach(p=>{
+p.className="pad";
+p.querySelector(".symbol").className="symbol";
+p.querySelector(".symbol").style.opacity=0;
+});
+
+const chosen =
+emojiMap[Math.floor(Math.random()*emojiMap.length)];
+
+document.getElementById("message").innerText =
+chosen.emoji;
+
+/* RÄTT SVAR */
+correctColor = chosen.color;
+const shuffled=shuffle(identities);
+
+
+/* VISUELLT ONLY */
+setTimeout(()=>{
+
+pads.forEach((p,i)=>{
+p.dataset.color=shuffled[i].color;
+p.classList.add(shuffled[i].color);
+
+let s=p.querySelector(".symbol");
+s.classList.add(shuffled[i].symbol);
+s.style.opacity=1;
+});
+
+gameState=STATE.READY;
+
+},900);
+}
+
+/* ================= PRESS ================= */
+
+function handlePress(pad){
+
+gameState=STATE.RESULT;
+
+if(pad.dataset.color===correctColor){
+pad.classList.add("correctGlow");
+rightSound();
+}else{
+wrongSound();
+}
+
+setTimeout(()=>{
+pad.classList.remove("correctGlow");
+newRound();
+},700);
+}
+
+function toggleMove(){
+moveMode=!moveMode;
+pads.forEach(p=>p.classList.toggle("moveMode",moveMode));
+}
+
+newRound();
+
+</script>
+</body>
+</html>
